@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>剪贴板助手</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section id="clipboardPage" class="page">
+        <header class="topbar">
+          <div>
+            <h1>剪贴板</h1>
+            <p id="historyMeta">最多保存 20 条</p>
+          </div>
+          <div class="actions" aria-label="剪贴板操作">
+            <button id="clearButton" type="button">全部删除</button>
+            <button id="importButton" type="button">导入</button>
+            <button id="multilineButton" type="button">多行复制</button>
+          </div>
+        </header>
+
+        <section id="queueSection" class="queue-section hidden">
+          <div class="section-title">
+            <div>
+              <h2>递归复制队列</h2>
+              <p id="queueMeta"></p>
+            </div>
+            <button id="copyNextButton" type="button">手动复制下一条</button>
+          </div>
+          <div id="queueList" class="queue-list"></div>
+        </section>
+
+        <section class="history-section">
+          <div class="section-title compact">
+            <h2>历史记录</h2>
+            <span id="historyCount"></span>
+          </div>
+          <div id="historyList" class="history-list"></div>
+        </section>
+      </section>
+
+      <section id="settingsPage" class="page hidden">
+        <header class="topbar">
+          <div>
+            <h1>设置</h1>
+            <p>保存后会立即生效，并在下次启动时保留</p>
+          </div>
+        </header>
+
+        <div class="settings-panel">
+          <label class="setting-row">
+            <span>
+              <strong>最小化到托盘</strong>
+              <small>点击窗口最小化后隐藏到系统托盘</small>
+            </span>
+            <input id="minimizeToTrayInput" type="checkbox" />
+          </label>
+          <label class="setting-row">
+            <span>
+              <strong>关闭时隐藏到托盘</strong>
+              <small>点击右上角关闭按钮后继续在后台监听剪贴板</small>
+            </span>
+            <input id="closeToTrayInput" type="checkbox" />
+          </label>
+          <label class="setting-row">
+            <span>
+              <strong>开机自启</strong>
+              <small>登录 Windows 后自动启动剪贴板助手</small>
+            </span>
+            <input id="startAtLoginInput" type="checkbox" />
+          </label>
+          <label class="setting-row">
+            <span>
+              <strong>粘贴后自动推进</strong>
+              <small>监听 Ctrl+V，粘贴完成后自动把队列下一条写入系统剪贴板</small>
+            </span>
+            <input id="autoAdvanceAfterPasteInput" type="checkbox" />
+          </label>
+          <label class="setting-row vertical">
+            <span>
+              <strong>历史记录数量</strong>
+              <small>范围 10-1000；数量变小时会立即裁剪历史记录，固定位置优先保留</small>
+            </span>
+            <input id="historyLimitInput" type="number" min="10" max="1000" />
+          </label>
+          <label class="setting-row vertical">
+            <span>
+              <strong>快捷打开工具</strong>
+              <small>点击输入框后按下组合键；留空则不启用</small>
+            </span>
+            <input id="openShortcutInput" type="text" readonly placeholder="未设置" />
+          </label>
+          <div class="page-actions">
+            <button id="saveSettingsButton" type="button">保存设置</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="groupsPage" class="page hidden">
+        <header class="topbar">
+          <div>
+            <h1>组记录</h1>
+            <p>保存常用的一组文本，应用后会按多行复制规则进入队列</p>
+          </div>
+        </header>
+
+        <div class="group-toolbar">
+          <input id="groupSearchInput" type="search" placeholder="搜索组记录名称" />
+          <button id="groupSearchButton" type="button">搜索</button>
+          <button id="newGroupButton" type="button">新增</button>
+        </div>
+        <div id="groupList" class="group-list"></div>
+      </section>
+    </main>
+
+    <div id="multilineModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+      <div class="modal">
+        <h2>多行复制</h2>
+        <textarea id="multilineInput" placeholder="每一行会成为一个递归复制项"></textarea>
+        <p class="modal-hint">提交后会先复制第一项。你在其它软件按 Ctrl+V 粘贴后，应用会自动准备下一项。</p>
+        <div class="modal-actions">
+          <button id="cancelMultilineButton" type="button">取消</button>
+          <button id="submitMultilineButton" type="button">加入队列</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="positionModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+      <div class="modal small">
+        <h2>指定位置固定</h2>
+        <input id="positionInput" type="number" min="1" value="2" />
+        <div class="modal-actions">
+          <button id="cancelPositionButton" type="button">取消</button>
+          <button id="submitPositionButton" type="button">固定</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="groupModal" class="modal-backdrop hidden" role="dialog" aria-modal="true">
+      <div class="modal">
+        <h2 id="groupModalTitle">新增组记录</h2>
+        <input id="groupNameInput" class="wide-input" type="text" placeholder="name" />
+        <textarea id="groupItemsInput" placeholder="每一行是一个 item，例如：&#10;url&#10;用户名&#10;密码"></textarea>
+        <div class="modal-actions">
+          <button id="cancelGroupButton" type="button">取消</button>
+          <button id="submitGroupButton" type="button">添加</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,60 @@
+{
+  "name": "clipboard-app",
+  "version": "0.1.0",
+  "description": "基于 Electron 的 Windows 桌面剪贴板助手。",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder --win nsis portable",
+    "dist:installer": "electron-builder --win nsis",
+    "dist:portable": "electron-builder --win portable"
+  },
+  "keywords": [
+    "electron",
+    "clipboard",
+    "windows"
+  ],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.7.7",
+    "electron-builder": "^26.8.1"
+  },
+  "dependencies": {
+    "uiohook-napi": "^1.5.5",
+    "xlsx": "^0.18.5"
+  },
+  "build": {
+    "appId": "com.local.clipboard-helper",
+    "productName": "剪贴板助手",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "assets/**/*",
+      "renderer/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "portable": {
+      "artifactName": "剪贴板助手-${version}-Portable.${ext}"
+    },
+    "nsis": {
+      "artifactName": "剪贴板助手-${version}-安装包.${ext}",
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "剪贴板助手"
+    }
+  }
+}
