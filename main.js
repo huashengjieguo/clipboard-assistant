@@ -27,6 +27,8 @@ let tray;
 let history = [];
 let copyQueue = [];
 let groupRecords = [];
+let latestOrdinaryCopyItem = null;
+let activePasteItem = null;
 let settings = { ...DEFAULT_SETTINGS };
 let lastSignature = "";
 let pollTimer;
@@ -161,6 +163,7 @@ function createWindow() {
 
 function showMainWindow() {
   if (!mainWindow || mainWindow.isDestroyed()) createWindow();
+  if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
 }
@@ -454,40 +457,51 @@ function removeExactTextFromHistory(text) {
 }
 
 function buildSequenceWithFixedItems(normalItems) {
-  const fixedByPosition = new Map(getFixedItemsByPosition().map((item) => [item.fixedPosition, cloneQueueItem(item, `固定位置 ${item.fixedPosition}`)]));
+  const fixedItems = getFixedItemsByPosition();
+  const fixedByPosition = new Map(fixedItems.map((item) => [item.fixedPosition, item]));
   const sequence = [];
   let normalIndex = 0;
-  let position = 1;
+  let absolutePosition = 1;
+  const maxFixedPosition = Math.max(...fixedItems.map((item) => item.fixedPosition), 1);
+  const fixedPositions = new Set(fixedItems.map((item) => item.fixedPosition));
+  const allCycleSlotsAreFixed = Array.from({ length: maxFixedPosition }, (_unused, index) => index + 1).every((position) =>
+    fixedPositions.has(position)
+  );
+  const cycleLength = allCycleSlotsAreFixed ? maxFixedPosition + 1 : maxFixedPosition;
 
-  while (normalIndex < normalItems.length || fixedByPosition.has(position)) {
+  while (normalIndex < normalItems.length) {
+    const position = ((absolutePosition - 1) % cycleLength) + 1;
     if (fixedByPosition.has(position)) {
-      sequence.push(fixedByPosition.get(position));
+      sequence.push(cloneQueueItem(fixedByPosition.get(position), `固定位置 ${position}`));
     } else if (normalIndex < normalItems.length) {
       sequence.push(normalItems[normalIndex]);
       normalIndex += 1;
-    } else {
-      break;
     }
-    position += 1;
+    absolutePosition += 1;
   }
 
   return sequence;
 }
 
-function createQueueGroup(items, source) {
+function createQueueGroup(items, source, mode) {
   const cleanedItems = items.filter(Boolean);
   if (cleanedItems.length === 0) return null;
 
   return {
     id: makeId(),
     source,
+    mode,
     items: cleanedItems,
     createdAt: Date.now()
   };
 }
 
-function startQueueFromItems(items, source) {
-  const group = createQueueGroup(items, source);
+function startQueueFromItems(items, source, mode) {
+  if (mode) {
+    copyQueue = copyQueue.filter((group) => group.mode !== mode);
+  }
+
+  const group = createQueueGroup(items, source, mode);
   if (!group) {
     updateTrayMenu();
     broadcastState();
@@ -504,7 +518,7 @@ function queueOrdinaryCopyFixedTail() {
   copyQueue = copyQueue.filter((group) => group.source !== "普通复制固定位置");
 
   if (fixedPositionTwo) {
-    copyQueue = copyQueue.concat(createQueueGroup([cloneQueueItem(fixedPositionTwo, "固定位置 2")], "普通复制固定位置"));
+    copyQueue = copyQueue.concat(createQueueGroup([cloneQueueItem(fixedPositionTwo, "固定位置 2")], "普通复制固定位置", "ordinary"));
   }
 
   updateTrayMenu();
@@ -529,6 +543,9 @@ function copyFromQueueGroup(group) {
 
   const item = group.items.shift();
   writeItemToClipboard(item);
+  if (group.mode) {
+    activePasteItem = { mode: group.mode, item };
+  }
   lastSignature = itemSignature(item);
 
   if (group.items.length === 0) {
@@ -540,8 +557,10 @@ function copyFromQueueGroup(group) {
   return item;
 }
 
-function copyNextQueueValue() {
-  const group = copyQueue.find((entry) => entry.items.length > 0);
+function copyNextQueueValue(preferredMode) {
+  const group =
+    copyQueue.find((entry) => entry.items.length > 0 && entry.mode === preferredMode) ||
+    copyQueue.find((entry) => entry.items.length > 0);
   return copyFromQueueGroup(group);
 }
 
@@ -552,7 +571,9 @@ function pollClipboard() {
   if (!snapshot || !signature || signature === lastSignature) return;
 
   lastSignature = signature;
-  addHistoryItem(snapshot);
+  const historyItem = addHistoryItem(snapshot);
+  latestOrdinaryCopyItem = cloneQueueItem(historyItem || snapshot, "普通复制");
+  activePasteItem = { mode: "ordinary", item: latestOrdinaryCopyItem };
   queueOrdinaryCopyFixedTail();
   broadcastState();
 }
@@ -603,12 +624,52 @@ function getState() {
   return {
     history,
     queue: copyQueue,
+    queueViews: getQueueViews(),
     queueCount: getQueueCount(),
+    activeQueueMode: activePasteItem?.mode || null,
     pasteAdvanceDelayMs: PASTE_ADVANCE_DELAY_MS,
     settings,
     minHistoryLimit: MIN_HISTORY_LIMIT,
     maxHistoryLimit: MAX_HISTORY_LIMIT,
     groupRecords
+  };
+}
+
+function getQueueViews() {
+  return {
+    ordinary: makeQueueView("ordinary", "普通复制"),
+    multiline: makeQueueView("multiline"),
+    import: makeQueueView("import")
+  };
+}
+
+function makeQueueView(mode, fallbackSource) {
+  const items = [];
+  if (activePasteItem && activePasteItem.mode === mode) {
+    items.push(activePasteItem.item);
+  }
+
+  const groups = copyQueue.filter((entry) => entry.mode === mode);
+  for (const group of groups) {
+    items.push(...group.items);
+  }
+
+  if (items.length === 0) {
+    return { groups: [], items: [], count: 0 };
+  }
+
+  return {
+    groups: [
+      {
+        id: `${mode}-preview`,
+        source: groups[0]?.source || fallbackSource || "递归复制",
+        mode,
+        items,
+        deleteGroupId: groups.length === 1 ? groups[0].id : null
+      }
+    ],
+    items,
+    count: items.length
   };
 }
 
@@ -627,9 +688,22 @@ function shouldAutoAdvanceAfterPaste(event, now = Date.now()) {
 }
 
 function scheduleAutoAdvanceAfterPaste(event) {
-  if (!shouldAutoAdvanceAfterPaste(event)) return false;
+  if (!isPasteHotkeyEvent(event)) return false;
+  if (!settings.autoAdvanceAfterPaste) return false;
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()) return false;
+  const now = Date.now();
+  if (now - lastPasteHotkeyAt < 250) return false;
+  lastPasteHotkeyAt = now;
+
   clearTimeout(pasteAdvanceTimer);
-  pasteAdvanceTimer = setTimeout(() => copyNextQueueValue(), PASTE_ADVANCE_DELAY_MS);
+  pasteAdvanceTimer = setTimeout(() => {
+    if (getQueueCount() > 0) {
+      copyNextQueueValue(activePasteItem?.mode);
+    } else if (activePasteItem) {
+      activePasteItem = null;
+      broadcastState();
+    }
+  }, PASTE_ADVANCE_DELAY_MS);
   return true;
 }
 
@@ -663,9 +737,13 @@ ipcMain.handle("copy-history-item", (_event, id) => {
 });
 
 ipcMain.handle("delete-history-item", (_event, id) => {
-  history = history.filter((item) => item.id !== id);
+  const item = history.find((entry) => entry.id === id);
+  if (item?.fixedPosition) {
+    return { ok: false, message: "请先取消固定位置，再删除该记录", state: getState() };
+  }
+  history = history.filter((entry) => entry.id !== id);
   broadcastState();
-  return getState();
+  return { ok: true, state: getState() };
 });
 
 ipcMain.handle("set-fixed-position", (_event, payload) => {
@@ -726,7 +804,7 @@ ipcMain.handle("import-file", async () => {
   const source = `${path.basename(filePath)} 导入`;
   const items = rowsToQueueItems(rows, source);
   addImportHistoryItem(filePath);
-  const queueResult = startQueueFromItems(items, source);
+  const queueResult = startQueueFromItems(items, source, "import");
 
   return {
     canceled: false,
@@ -742,7 +820,7 @@ ipcMain.handle("submit-multiline", (_event, text) => {
   const row = textValues(rawText.split(/\r?\n/));
   const items = rowsToQueueItems([row], "多行复制");
   addTextHistoryItem(rawText, "multiline");
-  const result = startQueueFromItems(items, "多行复制");
+  const result = startQueueFromItems(items, "多行复制", "multiline");
   return { ...result, state: getState() };
 });
 
@@ -752,8 +830,8 @@ ipcMain.handle("copy-queue-item", (_event, id) => {
   return { ok: Boolean(item), state: getState() };
 });
 
-ipcMain.handle("copy-next-queue-item", () => {
-  const item = copyNextQueueValue();
+ipcMain.handle("copy-next-queue-item", (_event, mode) => {
+  const item = copyNextQueueValue(mode);
   return { ok: Boolean(item), state: getState() };
 });
 
@@ -810,7 +888,7 @@ ipcMain.handle("apply-group-record", (_event, id) => {
   if (!record) return { ok: false, message: "未找到该组记录", state: getState() };
 
   const items = rowsToQueueItems([record.items], `组记录：${record.name}`);
-  const result = startQueueFromItems(items, `组记录：${record.name}`);
+  const result = startQueueFromItems(items, `组记录：${record.name}`, "multiline");
   return { ok: true, ...result, state: getState() };
 });
 
@@ -823,7 +901,21 @@ async function runClipboardSmokeTest() {
   const failures = [];
   history = [];
   copyQueue = [];
+  activePasteItem = null;
   lastSignature = "";
+
+  const repeatedFixed2 = addHistoryItem({ type: "text", content: "固定2", preview: "固定2" });
+  repeatedFixed2.fixedPosition = 2;
+  const repeatedItems = rowsToQueueItems([["A", "B", "C", "D"]], "多行复制");
+  const repeatedExpected = ["A", "固定2", "B", "固定2", "C", "固定2", "D"];
+  const repeatedActual = repeatedItems.map((item) => item.content);
+  if (JSON.stringify(repeatedActual) !== JSON.stringify(repeatedExpected)) {
+    failures.push(`固定位置 2 重复插入错误：${repeatedActual.join(" -> ")}`);
+  }
+
+  history = [];
+  copyQueue = [];
+  activePasteItem = null;
 
   const fixed2 = addHistoryItem({ type: "text", content: "固定2", preview: "固定2" });
   fixed2.fixedPosition = 2;
@@ -842,11 +934,16 @@ async function runClipboardSmokeTest() {
   }
 
   const shortItems = rowsToQueueItems([["A"]], "多行复制").map((item) => item.content);
-  if (JSON.stringify(shortItems) !== JSON.stringify(["A", "固定2"])) {
-    failures.push(`单项队列固定位置 2 插入错误：${shortItems.join(" -> ")}`);
+  if (JSON.stringify(shortItems) !== JSON.stringify(["A"])) {
+    failures.push(`单项队列不应插入未到达的固定位置：${shortItems.join(" -> ")}`);
   }
 
-  startQueueFromItems(items, "多行复制");
+  startQueueFromItems(items, "多行复制", "multiline");
+  const visibleQueue = getQueueViews().multiline.items.map((item) => item.content);
+  if (JSON.stringify(visibleQueue) !== JSON.stringify(expected)) {
+    failures.push(`递归复制队列显示顺序错误：${visibleQueue.join(" -> ")}`);
+  }
+
   for (const expectedValue of expected) {
     if (clipboard.readText() !== expectedValue) {
       failures.push(`剪贴板应为“${expectedValue}”，实际为“${clipboard.readText()}”`);
@@ -869,11 +966,12 @@ async function runPasteHookSmokeTest() {
   const failures = [];
   history = [];
   copyQueue = [];
+  activePasteItem = null;
   lastSignature = "";
   settings.autoAdvanceAfterPaste = true;
 
   const items = rowsToQueueItems([["第一行", "第二行", "第三行"]], "多行复制");
-  startQueueFromItems(items, "多行复制");
+  startQueueFromItems(items, "多行复制", "multiline");
 
   if (clipboard.readText() !== "第一行") {
     failures.push(`初始剪贴板应为“第一行”，实际为“${clipboard.readText()}”`);
@@ -896,6 +994,66 @@ async function runPasteHookSmokeTest() {
   app.exit(0);
 }
 
+function waitForWindowLoad() {
+  if (!mainWindow || mainWindow.isDestroyed()) return Promise.resolve();
+  if (!mainWindow.webContents.isLoading()) return Promise.resolve();
+  return new Promise((resolve) => {
+    mainWindow.webContents.once("did-finish-load", resolve);
+  });
+}
+
+async function runUiSmokeTest() {
+  const failures = [];
+  await waitForWindowLoad();
+
+  const topButtons = await mainWindow.webContents.executeJavaScript(
+    `[...document.querySelectorAll(".topbar .actions button")].map((button) => button.textContent.trim())`
+  );
+  if (JSON.stringify(topButtons) !== JSON.stringify(["全部删除"])) {
+    failures.push(`顶部按钮应只保留“全部删除”，实际为：${topButtons.join("、")}`);
+  }
+
+  const modalVisible = await mainWindow.webContents.executeJavaScript(`
+    (async () => {
+      document.querySelector('[data-clipboard-mode="multiline"]').click();
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const visible = !document.querySelector("#multilineModal").classList.contains("hidden");
+      document.querySelector("#cancelMultilineButton").click();
+      return visible;
+    })()
+  `);
+  if (!modalVisible) {
+    failures.push("点击下方“多行复制”后，应弹出多行文本框");
+  }
+
+  history = [];
+  copyQueue = [];
+  activePasteItem = null;
+  lastSignature = "";
+  const fixed2 = addHistoryItem({ type: "text", content: "g", preview: "g" });
+  fixed2.fixedPosition = 2;
+  const items = rowsToQueueItems([["a", "b", "c"]], "多行复制");
+  startQueueFromItems(items, "多行复制", "multiline");
+  await new Promise((resolve) => setTimeout(resolve, 180));
+
+  const queueRows = await mainWindow.webContents.executeJavaScript(
+    `[...document.querySelectorAll("#queueList .queue-item .item-text")].map((node) => node.textContent.trim())`
+  );
+  const expectedRows = ["a", "g", "b", "g", "c"];
+  if (JSON.stringify(queueRows) !== JSON.stringify(expectedRows)) {
+    failures.push(`递归复制队列应所见即所得，实际为：${queueRows.join(" -> ")}`);
+  }
+
+  if (failures.length > 0) {
+    console.error(failures.join("\n"));
+    app.exit(1);
+    return;
+  }
+
+  console.log("页面烟测通过：入口合并完成，递归复制队列完整显示最终粘贴顺序。");
+  app.exit(0);
+}
+
 app.whenReady().then(() => {
   app.setAppUserModelId("com.local.clipboard-helper");
   loadSettings();
@@ -915,6 +1073,12 @@ app.whenReady().then(() => {
   }
 
   createWindow();
+
+  if (process.argv.includes("--smoke-test-ui")) {
+    runUiSmokeTest();
+    return;
+  }
+
   createTrayIcon();
   startKeyboardHook();
   lastSignature = itemSignature(getClipboardSnapshot());

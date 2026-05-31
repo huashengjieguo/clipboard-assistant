@@ -2,8 +2,14 @@ const api = window.clipboardApp;
 
 const state = {
   page: "clipboard",
+  clipboardMode: "history",
   history: [],
   queue: [],
+  queueViews: {
+    ordinary: { groups: [], items: [], count: 0 },
+    multiline: { groups: [], items: [], count: 0 },
+    import: { groups: [], items: [], count: 0 }
+  },
   queueCount: 0,
   settings: {
     minimizeToTray: true,
@@ -31,12 +37,12 @@ const pages = {
 const historyMeta = document.querySelector("#historyMeta");
 const historyCount = document.querySelector("#historyCount");
 const historyList = document.querySelector("#historyList");
+const historySection = document.querySelector("#historySection");
 const queueSection = document.querySelector("#queueSection");
 const queueMeta = document.querySelector("#queueMeta");
 const queueList = document.querySelector("#queueList");
+const clipboardTabs = document.querySelectorAll("[data-clipboard-mode]");
 const clearButton = document.querySelector("#clearButton");
-const importButton = document.querySelector("#importButton");
-const multilineButton = document.querySelector("#multilineButton");
 const copyNextButton = document.querySelector("#copyNextButton");
 const multilineModal = document.querySelector("#multilineModal");
 const multilineInput = document.querySelector("#multilineInput");
@@ -70,7 +76,11 @@ let toastTimer;
 function applyState(nextState) {
   state.history = nextState.history || [];
   state.queue = nextState.queue || [];
+  state.queueViews = nextState.queueViews || state.queueViews;
   state.queueCount = nextState.queueCount || 0;
+  if (state.page === "clipboard" && nextState.activeQueueMode) {
+    state.clipboardMode = nextState.activeQueueMode;
+  }
   state.settings = nextState.settings || state.settings;
   state.minHistoryLimit = nextState.minHistoryLimit || 10;
   state.maxHistoryLimit = nextState.maxHistoryLimit || 1000;
@@ -113,19 +123,43 @@ function renderClipboard() {
   historyMeta.textContent = `历史记录最多保存 ${state.settings.historyLimit} 条；固定位置记录会优先保留`;
   historyCount.textContent = `${state.history.length}/${state.settings.historyLimit}`;
 
-  if (state.queue.length > 0 && state.queueCount > 0) {
+  clipboardTabs.forEach((button) => {
+    button.classList.toggle("active", button.dataset.clipboardMode === state.clipboardMode);
+  });
+
+  const isHistoryMode = state.clipboardMode === "history";
+  historySection.classList.toggle("hidden", !isHistoryMode);
+  queueSection.classList.toggle("hidden", isHistoryMode);
+
+  if (!isHistoryMode) {
+    const view = getCurrentQueueView();
+    const queueItems = view.items || [];
+    const deleteGroupId = view.groups && view.groups.length === 1 ? view.groups[0].deleteGroupId : null;
     queueSection.classList.remove("hidden");
-    queueMeta.textContent = `共 ${state.queue.length} 个队列格，剩余 ${state.queueCount} 条；按 Ctrl+V 粘贴后会自动准备下一条`;
-    queueList.innerHTML = state.queue.map(renderQueueItem).join("");
-  } else {
-    queueSection.classList.add("hidden");
-    queueList.innerHTML = "";
+    queueMeta.textContent = getQueueModeMeta(state.clipboardMode, view);
+    queueList.innerHTML =
+      queueItems.length === 0
+        ? '<div class="empty">暂无递归复制队列</div>'
+        : queueItems.map((item, index) => renderQueueItem(item, index, index === 0 ? deleteGroupId : null)).join("");
   }
 
   historyList.innerHTML =
     state.history.length === 0
       ? '<div class="empty">复制文本或图片后会出现在这里</div>'
       : state.history.map(renderHistoryItem).join("");
+}
+
+function getCurrentQueueView() {
+  return state.queueViews[state.clipboardMode] || { groups: [], items: [], count: 0 };
+}
+
+function getQueueModeMeta(mode, view) {
+  const names = {
+    ordinary: "普通复制",
+    multiline: "多行复制",
+    import: "导入复制"
+  };
+  return `${names[mode] || "递归复制"}队列，剩余 ${view.count} 条；第一条就是下一次 Ctrl+V 会粘贴的内容`;
 }
 
 function renderHistoryItem(item, index) {
@@ -159,7 +193,7 @@ function renderHistoryItem(item, index) {
       ${
         isMenuOpen
           ? `<div class="menu" data-menu="${item.id}">
-              <button class="danger" type="button" data-action="delete" data-id="${item.id}">删除</button>
+              <button class="danger" type="button" data-action="delete" data-id="${item.id}" ${item.fixedPosition ? "disabled" : ""}>删除</button>
               ${fixedAction}
             </div>`
           : ""
@@ -193,26 +227,27 @@ function renderHistoryContent(item) {
   return `<div class="item-text">${escapeHtml(content)}</div>`;
 }
 
-function renderQueueItem(item, index) {
-  const nextItem = item.items && item.items.length > 0 ? item.items[0] : null;
-  const remainingCount = item.items ? item.items.length : 0;
+function renderQueueItem(item, index, deleteGroupId) {
   const preview =
-    nextItem && nextItem.type === "image"
-      ? `<img class="image-preview" src="${nextItem.imageDataUrl}" alt="队列图片" />`
-      : `<div class="item-text">${escapeHtml(nextItem ? nextItem.content || nextItem.preview || "" : "")}</div>`;
+    item && item.type === "image"
+      ? `<img class="image-preview" src="${item.imageDataUrl}" alt="队列图片" />`
+      : `<div class="item-text">${escapeHtml(item ? item.content || item.preview || "" : "")}</div>`;
 
   return `
-    <article class="item queue-item clickable" data-queue-id="${item.id}">
+    <article class="item queue-item">
       <div class="item-content">
         ${preview}
         <div class="item-meta">
-          <span class="badge queue">队列格 ${index + 1}</span>
-          <span class="badge">剩余 ${remainingCount} 条</span>
+          <span class="badge queue">${index === 0 ? "下一次粘贴" : `第 ${index + 1} 次粘贴`}</span>
           <span class="badge">${escapeHtml(item.source || "递归复制")}</span>
         </div>
       </div>
       <div class="queue-side">
-        <button class="queue-delete" type="button" aria-label="删除队列项" data-delete-queue-id="${item.id}">×</button>
+        ${
+          deleteGroupId
+            ? `<button class="queue-delete" type="button" aria-label="删除队列项" data-delete-queue-id="${deleteGroupId}">×</button>`
+            : ""
+        }
       </div>
     </article>
   `;
@@ -307,7 +342,7 @@ clearButton.addEventListener("click", async () => {
   showToast("已删除未固定位置的记录");
 });
 
-importButton.addEventListener("click", async () => {
+async function openImportDialog() {
   try {
     const result = await api.importFile();
     if (!result.canceled) {
@@ -317,9 +352,8 @@ importButton.addEventListener("click", async () => {
   } catch (error) {
     showToast(error.message || "导入失败");
   }
-});
+}
 
-multilineButton.addEventListener("click", openMultilineModal);
 cancelMultilineButton.addEventListener("click", closeMultilineModal);
 
 submitMultilineButton.addEventListener("click", async () => {
@@ -330,9 +364,23 @@ submitMultilineButton.addEventListener("click", async () => {
 });
 
 copyNextButton.addEventListener("click", async () => {
-  const result = await api.copyNextQueueItem();
+  const result = await api.copyNextQueueItem(state.clipboardMode);
   applyState(result.state);
   if (result.ok) showToast("已复制并销毁队列首项");
+});
+
+clipboardTabs.forEach((button) => {
+  button.addEventListener("click", async () => {
+    const mode = button.dataset.clipboardMode;
+    state.clipboardMode = mode;
+    renderClipboard();
+    if (mode === "multiline") {
+      openMultilineModal();
+    }
+    if (mode === "import") {
+      await openImportDialog();
+    }
+  });
 });
 
 cancelPositionButton.addEventListener("click", closePositionModal);
@@ -504,7 +552,12 @@ historyList.addEventListener("click", async (event) => {
     const action = menuAction.dataset.action;
 
     if (action === "delete") {
-      await api.deleteHistoryItem(id);
+      const result = await api.deleteHistoryItem(id);
+      applyState(result.state);
+      if (!result.ok) {
+        showToast(result.message || "删除失败");
+        return;
+      }
       state.openMenuId = null;
       showToast("已删除");
     }
@@ -530,19 +583,12 @@ historyList.addEventListener("click", async (event) => {
 
 queueList.addEventListener("click", async (event) => {
   const deleteButton = event.target.closest("[data-delete-queue-id]");
-  const queueItem = event.target.closest("[data-queue-id]");
 
   if (deleteButton) {
     event.stopPropagation();
     await api.deleteQueueItem(deleteButton.dataset.deleteQueueId);
     showToast("已删除队列项");
     return;
-  }
-
-  if (queueItem) {
-    const result = await api.copyQueueItem(queueItem.dataset.queueId);
-    applyState(result.state);
-    if (result.ok) showToast("已复制并销毁该项");
   }
 });
 

@@ -20,7 +20,7 @@ contextBridge.exposeInMainWorld("clipboardApp", {
   importFile: () => ipcRenderer.invoke("import-file"),
   submitMultiline: (text) => ipcRenderer.invoke("submit-multiline", text),
   copyQueueItem: (id) => ipcRenderer.invoke("copy-queue-item", id),
-  copyNextQueueItem: () => ipcRenderer.invoke("copy-next-queue-item"),
+  copyNextQueueItem: (mode) => ipcRenderer.invoke("copy-next-queue-item", mode),
   deleteQueueItem: (id) => ipcRenderer.invoke("delete-queue-item", id),
   updateSettings: (settings) => ipcRenderer.invoke("update-settings", settings),
   createGroupRecord: (payload) => ipcRenderer.invoke("create-group-record", payload),

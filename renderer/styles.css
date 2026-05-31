@@ -49,6 +49,16 @@ button:hover {
   background: #fffaf5;
 }
 
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button:disabled:hover {
+  background: inherit;
+  border-color: var(--border);
+}
+
 .app-shell {
   min-height: 100vh;
   padding: 24px 26px 32px;
@@ -109,7 +119,30 @@ h2 {
   white-space: nowrap;
 }
 
-#importButton,
+.clipboard-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0 0 18px;
+}
+
+.tab-button {
+  min-height: 40px;
+  padding: 0 12px;
+  font-weight: 600;
+}
+
+.tab-button.active {
+  color: #ffffff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.tab-button.active:hover {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
+
 #submitMultilineButton,
 #submitPositionButton,
 #copyNextButton {
@@ -118,7 +151,6 @@ h2 {
   color: #ffffff;
 }
 
-#importButton:hover,
 #submitMultilineButton:hover,
 #submitPositionButton:hover,
 #copyNextButton:hover {
@@ -578,6 +610,10 @@ input.capturing {
     justify-content: flex-start;
     max-width: none;
     margin-top: 12px;
+  }
+
+  .clipboard-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .item {

@@ -68,6 +68,21 @@ B -> A
 
 Multi-line copy / TXT import:
 
+If only `G` is fixed at position `2`, and the normal items are:
+
+```text
+A
+B
+C
+D
+```
+
+The paste order is:
+
+```text
+A -> G -> B -> G -> C -> G -> D
+```
+
 For normal items:
 
 ```text

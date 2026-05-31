@@ -16,10 +16,15 @@
           </div>
           <div class="actions" aria-label="剪贴板操作">
             <button id="clearButton" type="button">全部删除</button>
-            <button id="importButton" type="button">导入</button>
-            <button id="multilineButton" type="button">多行复制</button>
           </div>
         </header>
+
+        <nav class="clipboard-tabs" aria-label="剪贴板模式">
+          <button class="tab-button active" type="button" data-clipboard-mode="history">历史记录</button>
+          <button class="tab-button" type="button" data-clipboard-mode="ordinary">普通复制</button>
+          <button class="tab-button" type="button" data-clipboard-mode="multiline">多行复制</button>
+          <button class="tab-button" type="button" data-clipboard-mode="import">导入复制</button>
+        </nav>
 
         <section id="queueSection" class="queue-section hidden">
           <div class="section-title">
@@ -32,7 +37,7 @@
           <div id="queueList" class="queue-list"></div>
         </section>
 
-        <section class="history-section">
+        <section id="historySection" class="history-section">
           <div class="section-title compact">
             <h2>历史记录</h2>
             <span id="historyCount"></span>

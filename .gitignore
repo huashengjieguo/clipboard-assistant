@@ -4,4 +4,5 @@ builder-debug.yml
 builder-effective-config.yaml
 dist/
 release/
+release-latest/
 .DS_Store
